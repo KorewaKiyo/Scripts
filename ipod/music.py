@@ -2,23 +2,32 @@ import os
 import subprocess
 import time
 
-try:
-    import acoustid
-except ModuleNotFoundError:
-    print("Module pyacoustid not found, will not fingerprint files")
+# Generate AcoustID fingerprints,
+# Takes a little longer, but helps when you want to tag files with Picard
+ACOUSTID = False
 
 # Path to needed executables
 FFPROBE = r"G:\ffprobe.exe"
 FFMPEG = r"G:\ffmpeg.exe"
 
 # Path to operate on
-ROOT_DIR = r"G:\MusicCopy"
+ROOT_DIR = r"G:\Music Copy"
 
 # Desired max size of cover art, in px
 # All art will be squared to this dimension
 COVER_SIZE = 600
 
+# Don't convert anything, just print what we would run instead
 DRY_RUN = False
+
+
+if ACOUSTID:
+    try:
+        import acoustid
+        ACOUSTID = True
+    except ModuleNotFoundError:
+        ACOUSTID = False
+        print("Module pyacoustid not found, will not fingerprint files")
 
 def walk_music_files(root_folder):
     """Walk through the root folder, and store counts and lists of files matching certain extensions"""
@@ -60,10 +69,16 @@ def check_cover_art(music_file):
             stderr=subprocess.PIPE,
             text=True,
         ).stdout.splitlines()
-        return ["video" in result,int(result[1]),int(result[2])]
+
+        # If cover is oversize, return false for second value
+        # No need to check the result, as it will fail and move to the except clause if there's no cover.
+        if int(result[1]) > COVER_SIZE or int(result[2]) > COVER_SIZE:
+            return [True, False]
+        else:
+            return [True, True]
     except Exception as e:
         print(f"Error probing file: {music_file}\n{e}")
-        return [False,0,0]
+        return [False,False]
 
 def find_cover_image(music_file):
     """Find cover art in the directory of the music file and return path"""
@@ -92,13 +107,13 @@ def resize_cover_image(input_file, output_file):
     if input_ext in [".m4a", ".mp3", ".flac", ".jpg",".png"]:
         print(f"Extracting image from: {input_file}")
 
-        filter = f"scale={COVER_SIZE}:{COVER_SIZE}:force_original_aspect_ratio=decrease,pad={COVER_SIZE}:{COVER_SIZE}:(ow-iw)/2:(oh-ih)/2"
+        filter = f'scale="{COVER_SIZE}:{COVER_SIZE}:force_original_aspect_ratio=decrease,pad={COVER_SIZE}:{COVER_SIZE}:(ow-iw)/2:(oh-ih)/2"'
 
         resized_jpeg = subprocess.run(
                 [
-                    FFMPEG, "-i", input_file, "-v", "error", "-hide_banner", 
+                    FFMPEG, "-i", f'"{input_file}"', "-v", "error", "-hide_banner", 
                     "-an", "-y", "-vf", filter,
-                    output_file
+                    f'"{output_file}"'
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -114,21 +129,23 @@ def convert_flac(flac_file):
     cover = check_cover_art(flac_file)
     folder_cover = find_cover_image(flac_file)
 
-    resize_filter =  f"-c:v mjpeg -vf 'scale={COVER_SIZE}:{COVER_SIZE}:force_original_aspect_ratio=decrease,pad={COVER_SIZE}:{COVER_SIZE}:(ow-iw)/2:(oh-ih)/2'"
+    resize_filter =  f'-c:v mjpeg -vf "scale={COVER_SIZE}:{COVER_SIZE}:force_original_aspect_ratio=decrease,pad={COVER_SIZE}:{COVER_SIZE}:(ow-iw)/2:(oh-ih)/2"'
     attach_file = ""
+    fingerprint_metadata = ""
+
     if folder_cover is not None and "cover-resized" in folder_cover:
-        attach_file = f"-i {folder_cover} -map 1:v"
+        attach_file = f'-i "{folder_cover}" -map 1:v'
         cover = check_cover_art(folder_cover)
     elif cover[0]:
-        attach_file = "-c:v copy"
+        attach_file = "-map 0:v -c:v copy"
         folder_cover = flac_file
     elif folder_cover is not None:
-        attach_file = f"-i {folder_cover} -map 1:v"
+        attach_file = f'-i "{folder_cover}" -map 1:v'
         cover = check_cover_art(folder_cover)
     else:
         print(f"No suitable cover image found for: {flac_file}")
 
-    if cover[1] > COVER_SIZE or cover[2] > COVER_SIZE:
+    if cover[0] and not cover[1]:
         # Resize and save the cover, so we may use it again
         new_cover_filename = os.path.split(flac_file)[0] + r"\cover-resized.jpg"
         print(f"Resizing from: {folder_cover}")
@@ -138,24 +155,33 @@ def convert_flac(flac_file):
         resize_filter = ""
 
     alac_name = os.path.splitext(flac_file)[0] + ".m4a"
-    conversion = [FFMPEG, "-i", flac_file, attach_file,
-         "-map_metadata 0", "-map 0:a", "-metadata:s:v title='Album cover'", "-metadata:s:v comment='Cover (front)'"
-         " -c:a alac", "-disposition:v:0 attached_pic", resize_filter, alac_name
-        ]
+    if ACOUSTID:
+        fingerprint = acoustid.fingerprint_file(flac_file)
+        fingerprint_metadata = f'-metadata "AcoustID Fingerprint={fingerprint[1].decode('ascii')}"'
+
+    conversion = " ".join([
+        FFMPEG,  "-i", f'"{flac_file}"', "-c:a alac",  attach_file, "-disposition:v:0 attached_pic",
+        "-map_metadata 0", "-map 0:a",  fingerprint_metadata, '-metadata:s:v title="Album cover"',
+        '-metadata:s:v comment="Cover (front)"', resize_filter, f'"{alac_name}"', "-y",
+        ])
     if DRY_RUN:
-        print(" ".join(conversion))
+        print(conversion)
         print("\n")
         return None
     else:
+        print(f"\nRunning conversion on {flac_file}\n")
         try:
             output = subprocess.run(conversion,
                            stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE,
                            text=True,
                            )
-            return alac_name
+            print(output.stderr)
+            if os.path.exists(alac_name):
+                print(f"Conversion succeeded, removing {flac_file}")
+                os.remove(flac_file)
         except Exception as e:
-            print(f"Error converting file: {flac_file}\n{e}")
+            print(f"\nError converting file: {flac_file}\n{e}")
             return None
 
 def process_music_files(directory):
@@ -163,21 +189,34 @@ def process_music_files(directory):
     music = walk_music_files(directory)
     for flac in music["flac_list"]:
         alac = convert_flac(flac)
-        if alac is not None:
-            os.remove(flac)
-    for file in music["m4a_list"]:
-        continue
-        cover_exists = check_cover_art(file)
+        
 
-        if not cover_exists[0]:
-            cover = find_cover_image(file)
-        elif cover_exists[1] > COVER_SIZE or cover_exists[2] > COVER_SIZE:
-            print(f"File has large cover art, resizing: {file}")
-            resize_cover_image(file)
-            continue
+    for m4a_file in music["m4a_list"]:
+        continue
+        new_cover_filename = None
+        cover = check_cover_art(m4a_file)
+        folder_cover = find_cover_image(m4a_file)
+
+        if folder_cover is not None and "cover-resized" in folder_cover:
+            attach_file = f'-i "{folder_cover}" -map 1:v'
+            cover = check_cover_art(folder_cover)
+        elif cover[0]:
+            attach_file = "-map 0:v -c:v copy"
+            folder_cover = m4a_file
+        elif folder_cover is not None:
+            attach_file = f'-i "{folder_cover}" -map 1:v'
+            cover = check_cover_art(folder_cover)
         else:
-            print(f"File has correctly sized cover art, skipping: {file}")
-            continue
+            print(f"No suitable cover image found for: {flac_file}")
+
+        if cover[1] > COVER_SIZE or cover[2] > COVER_SIZE:
+            # Resize and save the cover, so we may use it again
+            new_cover_filename = os.path.split(flac_file)[0] + r"\cover-resized.jpg"
+            print(f"Resizing from: {folder_cover}")
+            cover = resize_cover_image(folder_cover, new_cover_filename)
+        else:
+            # Blank out the resize filter, as we do not need it
+            resize_filter = ""
 
 if __name__ == "__main__":
     process_music_files(ROOT_DIR)
