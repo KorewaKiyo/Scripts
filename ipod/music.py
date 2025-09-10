@@ -11,7 +11,7 @@ FFPROBE = r"G:\ffprobe.exe"
 FFMPEG = r"G:\ffmpeg.exe"
 
 # Path to operate on
-ROOT_DIR = r"G:\Music Copy"
+ROOT_DIR = r"G:\Music"
 
 # Desired max size of cover art, in px
 # All art will be squared to this dimension
@@ -67,7 +67,7 @@ def check_cover_art(music_file):
             [FFPROBE, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_type,width,height", "-of", "default=noprint_wrappers=1:nokey=1", music_file],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True,
+            encoding='utf-8'
         ).stdout.splitlines()
 
         # If cover is oversize, return false for second value
@@ -107,19 +107,22 @@ def resize_cover_image(input_file, output_file):
     if input_ext in [".m4a", ".mp3", ".flac", ".jpg",".png"]:
         print(f"Extracting image from: {input_file}")
 
-        filter = f'scale="{COVER_SIZE}:{COVER_SIZE}:force_original_aspect_ratio=decrease,pad={COVER_SIZE}:{COVER_SIZE}:(ow-iw)/2:(oh-ih)/2"'
+        filter = f'scale={COVER_SIZE}:{COVER_SIZE}:force_original_aspect_ratio=decrease,pad={COVER_SIZE}:{COVER_SIZE}:(ow-iw)/2:(oh-ih)/2'
 
         resized_jpeg = subprocess.run(
                 [
-                    FFMPEG, "-i", f'"{input_file}"', "-v", "error", "-hide_banner", 
+                    FFMPEG, "-i", f"{input_file}", "-v", "error", "-hide_banner", 
                     "-an", "-y", "-vf", filter,
-                    f'"{output_file}"'
+                    f"{output_file}"
                 ],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
+                encoding='utf-8'
             )
         time.sleep(3)
+        if not os.path.exists(output_file):
+            print(resized_jpeg.stderr)
+            raise FileNotFoundError("Resize failed")
     else:
         print(f"Unable to resize: {input_file}")
 
@@ -134,17 +137,18 @@ def convert_flac(flac_file):
     fingerprint_metadata = ""
 
     if folder_cover is not None and "cover-resized" in folder_cover:
-        attach_file = f'-i "{folder_cover}" -map 1:v'
+        attach_file = f'-i "{folder_cover}" -map 1:v -c:v mjpeg '
         cover = check_cover_art(folder_cover)
     elif cover[0]:
         attach_file = "-map 0:v -c:v copy"
         folder_cover = flac_file
     elif folder_cover is not None:
-        attach_file = f'-i "{folder_cover}" -map 1:v'
+        attach_file = f'-i "{folder_cover}" -map 1:v-c:v mjpeg  '
         cover = check_cover_art(folder_cover)
     else:
         print(f"No suitable cover image found for: {flac_file}")
 
+    
     if cover[0] and not cover[1]:
         # Resize and save the cover, so we may use it again
         new_cover_filename = os.path.split(flac_file)[0] + r"\cover-resized.jpg"
@@ -160,8 +164,8 @@ def convert_flac(flac_file):
         fingerprint_metadata = f'-metadata "AcoustID Fingerprint={fingerprint[1].decode('ascii')}"'
 
     conversion = " ".join([
-        FFMPEG,  "-i", f'"{flac_file}"', "-c:a alac",  attach_file, "-disposition:v:0 attached_pic",
-        "-map_metadata 0", "-map 0:a",  fingerprint_metadata, '-metadata:s:v title="Album cover"',
+        FFMPEG,  "-i", f'"{flac_file}"', attach_file, "-map 0:a", "-c:a alac", "-disposition:v:0 attached_pic",
+        "-map_metadata 0",  fingerprint_metadata, '-metadata:s:v title="Album cover"',
         '-metadata:s:v comment="Cover (front)"', resize_filter, f'"{alac_name}"', "-y",
         ])
     if DRY_RUN:
@@ -172,16 +176,16 @@ def convert_flac(flac_file):
         print(f"\nRunning conversion on {flac_file}\n")
         try:
             output = subprocess.run(conversion,
-                           stdout=subprocess.PIPE,
                            stderr=subprocess.PIPE,
-                           text=True,
+                           encoding='utf-8'
                            )
-            print(output.stderr)
+            
             if os.path.exists(alac_name):
                 print(f"Conversion succeeded, removing {flac_file}")
                 os.remove(flac_file)
         except Exception as e:
             print(f"\nError converting file: {flac_file}\n{e}")
+            print(f"Command to convert was: {conversion}")
             return None
 
 def process_music_files(directory):
