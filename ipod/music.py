@@ -13,6 +13,9 @@ FFMPEG = r"G:\ffmpeg.exe"
 # Path to operate on
 ROOT_DIR = r"G:\Music"
 
+# You're welcome, Dan.
+DELETE_FLACS = True
+
 # Desired max size of cover art, in px
 # All art will be squared to this dimension
 COVER_SIZE = 600
@@ -180,7 +183,7 @@ def convert_flac(flac_file):
                            encoding='utf-8'
                            )
             
-            if os.path.exists(alac_name):
+            if os.path.exists(alac_name) and DELETE_FLACS:
                 print(f"Conversion succeeded, removing {flac_file}")
                 os.remove(flac_file)
         except Exception as e:
