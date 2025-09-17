@@ -24,7 +24,7 @@ COVER_SIZE = 600
 MAX_SAMPLE = 48000
 
 # Don't convert anything, just print what we would run instead
-DRY_RUN = True
+DRY_RUN = False
 
 
 if ACOUSTID:
@@ -240,10 +240,15 @@ def process_music_files(directory):
         alac = convert_flac(flac)
 
     for m4a_file in music["m4a_list"]:
-        # Check cover art, if it's correctly sized, jump over
+        # Run operations on ALAC/AAC files to make them more ipod friendly
+
         m4a_cover = check_cover_art(m4a_file)
-        if m4a_cover[1]:
+        sample_convert = ""
+        sample_rate = check_sample_rate(m4a_file)
+        if m4a_cover[1] and sample_rate == 0:
+            # If the cover image and sample rate are good, skip it
             continue
+
         new_cover_filename = os.path.split(m4a_file)[0] + r"\cover-resized.jpg"
         attach_file = ""
         resize_filter = f'-c:v mjpeg -vf "scale={COVER_SIZE}:{COVER_SIZE}:force_original_aspect_ratio=decrease,pad={COVER_SIZE}:{COVER_SIZE}:(ow-iw)/2:(oh-ih)/2"'
@@ -272,8 +277,6 @@ def process_music_files(directory):
             # Blank out the resize filter, as we do not need it
             resize_filter = ""
 
-        sample_convert = ""
-        sample_rate = check_sample_rate(flac_file)
         if sample_rate > 0:
             sample_convert = f"-ar {sample_rate}"
 
@@ -286,7 +289,7 @@ def process_music_files(directory):
             print(conversion)
             print("\n")
         else:
-            print(f"\nResizing cover for: {m4a_file}")
+            print(f"\nRunning operations on: {m4a_file}")
             try:
                 output = subprocess.run(conversion,
                             stderr=subprocess.PIPE,
@@ -294,7 +297,7 @@ def process_music_files(directory):
                             )
                 
                 if os.path.exists(temp_m4a):
-                    print(f"Resizing succeeded, moving temp file to {m4a_file}")
+                    print(f"Succeeded, moving temp file to {m4a_file}")
                     os.replace(temp_m4a, m4a_file)
             except Exception as e:
                 print(f"Error resizing file cover: {m4a_file}\n{e}")
