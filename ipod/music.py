@@ -233,7 +233,6 @@ def convert_flac(flac_file):
 def process_music_files(directory):
     """Coordinate all operations to be processed on music collection"""
     music = walk_music_files(directory)
-
     print(f"FLACs: {music["flac"]}\nALACs: {music["m4a"]}\nMP3s: {music["mp3"]}")
     
     for flac in music["flac_list"]:
@@ -243,7 +242,7 @@ def process_music_files(directory):
         # Run operations on ALAC/AAC files to make them more ipod friendly
 
         m4a_cover = check_cover_art(m4a_file)
-        sample_convert = ""
+        sample_convert = "-c:a copy"
         sample_rate = check_sample_rate(m4a_file)
         if m4a_cover[1] and sample_rate == 0:
             # If the cover image and sample rate are good, skip it
@@ -278,10 +277,10 @@ def process_music_files(directory):
             resize_filter = ""
 
         if sample_rate > 0:
-            sample_convert = f"-ar {sample_rate}"
+            sample_convert = f"-c:a alac -ar {sample_rate}"
 
         conversion = " ".join([
-            FFMPEG,  "-i", f'"{m4a_file}"', attach_file, "-map 0:a", "-c:a copy", sample_convert, "-disposition:v:0 attached_pic",
+            FFMPEG,  "-i", f'"{m4a_file}"', attach_file, "-map 0:a", sample_convert, "-disposition:v:0 attached_pic",
             "-map_metadata 0", '-metadata:s:v title="Album cover"',
             '-metadata:s:v comment="Cover (front)"', resize_filter, f'"{temp_m4a}"', "-y",
         ])
@@ -302,6 +301,9 @@ def process_music_files(directory):
             except Exception as e:
                 print(f"Error resizing file cover: {m4a_file}\n{e}")
                 print(f"Command to convert was: {conversion}")
+    
+    music = walk_music_files(directory)
+    print(f"FLACs: {music["flac"]}\nALACs: {music["m4a"]}\nMP3s: {music["mp3"]}")
 
         
 
