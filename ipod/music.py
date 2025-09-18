@@ -1,6 +1,11 @@
 import os
 import subprocess
 import time
+try:
+    from alive_progress import alive_bar
+except ModuleNotFoundError:
+    print("Module needed: alive_progress\nInstall with: pip install alive_progress")
+    exit()
 
 # Generate AcoustID fingerprints,
 # Takes a little longer, but helps when you want to tag files with Picard
@@ -234,73 +239,81 @@ def process_music_files(directory):
     """Coordinate all operations to be processed on music collection"""
     music = walk_music_files(directory)
     print(f"FLACs: {music["flac"]}\nALACs: {music["m4a"]}\nMP3s: {music["mp3"]}")
+
+
+    with alive_bar(music["flac"]) as flac_bar:
+        flac_bar.title("FLAC Files:")
+        for flac in music["flac_list"]:
+            alac = convert_flac(flac)
+            flac_bar()
     
-    for flac in music["flac_list"]:
-        alac = convert_flac(flac)
+    with alive_bar(music["m4a"]) as m4a_bar:
+        m4a_bar.title("M4A Files:")
+        for m4a_file in music["m4a_list"]:
+            # Run operations on ALAC/AAC files to make them more ipod friendly
+            m4a_bar()
+            m4a_cover = check_cover_art(m4a_file)
+            sample_convert = "-c:a copy"
+            sample_rate = check_sample_rate(m4a_file)
+            if m4a_cover[1] and sample_rate == 0:
+                # If the cover image and sample rate are good, skip it
+                continue
 
-    for m4a_file in music["m4a_list"]:
-        # Run operations on ALAC/AAC files to make them more ipod friendly
-
-        m4a_cover = check_cover_art(m4a_file)
-        sample_convert = "-c:a copy"
-        sample_rate = check_sample_rate(m4a_file)
-        if m4a_cover[1] and sample_rate == 0:
-            # If the cover image and sample rate are good, skip it
-            continue
-
-        new_cover_filename = os.path.split(m4a_file)[0] + r"\cover-resized.jpg"
-        attach_file = ""
-        resize_filter = f'-c:v mjpeg -vf "scale={COVER_SIZE}:{COVER_SIZE}:force_original_aspect_ratio=decrease,pad={COVER_SIZE}:{COVER_SIZE}:(ow-iw)/2:(oh-ih)/2"'
-        temp_m4a = os.path.splitext(m4a_file)[0] + "-temp" + ".m4a"
-
-        folder_cover = find_cover_image(m4a_file)
-        if folder_cover is not None and "cover-resized" in folder_cover:
-            attach_file = f'-i "{folder_cover}" -map 1:v -c:v mjpeg '
-            m4a_cover = check_cover_art(folder_cover)
-        elif m4a_cover[0]:
-            attach_file = "-map 0:v -c:v copy"
-            folder_cover = m4a_file
-        elif folder_cover is not None:
-            attach_file = f'-i "{folder_cover}" -map 1:v -c:v mjpeg  '
-            m4a_cover = check_cover_art(folder_cover)
-        else:
-            print(f"No suitable cover image found for: {m4a_file}")
-            continue
-            
-        if m4a_cover[0] and not m4a_cover[1]:
-            # Resize and save the cover, so we may use it again
             new_cover_filename = os.path.split(m4a_file)[0] + r"\cover-resized.jpg"
-            print(f"Resizing from: {folder_cover}")
-            resize_cover_image(folder_cover, new_cover_filename)
-        else:
-            # Blank out the resize filter, as we do not need it
-            resize_filter = ""
+            attach_file = ""
+            resize_filter = f'-c:v mjpeg -vf "scale={COVER_SIZE}:{COVER_SIZE}:force_original_aspect_ratio=decrease,pad={COVER_SIZE}:{COVER_SIZE}:(ow-iw)/2:(oh-ih)/2"'
+            temp_m4a = os.path.splitext(m4a_file)[0] + "-temp" + ".m4a"
 
-        if sample_rate > 0:
-            sample_convert = f"-c:a alac -ar {sample_rate}"
-
-        conversion = " ".join([
-            FFMPEG,  "-i", f'"{m4a_file}"', attach_file, "-map 0:a", sample_convert, "-disposition:v:0 attached_pic",
-            "-map_metadata 0", '-metadata:s:v title="Album cover"',
-            '-metadata:s:v comment="Cover (front)"', resize_filter, f'"{temp_m4a}"', "-y",
-        ])
-        if DRY_RUN:
-            print(conversion)
-            print("\n")
-        else:
-            print(f"\nRunning operations on: {m4a_file}")
-            try:
-                output = subprocess.run(conversion,
-                            stderr=subprocess.PIPE,
-                            encoding='utf-8'
-                            )
+            folder_cover = find_cover_image(m4a_file)
+            if folder_cover is not None and "cover-resized" in folder_cover:
+                attach_file = f'-i "{folder_cover}" -map 1:v -c:v mjpeg '
+                m4a_cover = check_cover_art(folder_cover)
+            elif m4a_cover[0]:
+                attach_file = "-map 0:v -c:v copy"
+                folder_cover = m4a_file
+            elif folder_cover is not None:
+                attach_file = f'-i "{folder_cover}" -map 1:v -c:v mjpeg  '
+                m4a_cover = check_cover_art(folder_cover)
+            else:
+                print(f"No suitable cover image found for: {m4a_file}")
+                continue
                 
-                if os.path.exists(temp_m4a):
-                    print(f"Succeeded, moving temp file to {m4a_file}")
-                    os.replace(temp_m4a, m4a_file)
-            except Exception as e:
-                print(f"Error resizing file cover: {m4a_file}\n{e}")
-                print(f"Command to convert was: {conversion}")
+            if m4a_cover[0] and not m4a_cover[1]:
+                # Resize and save the cover, so we may use it again
+                new_cover_filename = os.path.split(m4a_file)[0] + r"\cover-resized.jpg"
+                print(f"Resizing from: {folder_cover}")
+                resize_cover_image(folder_cover, new_cover_filename)
+            else:
+                # Blank out the resize filter, as we do not need it
+                resize_filter = ""
+
+            if sample_rate > 0:
+                sample_convert = f"-c:a alac -ar {sample_rate}"
+
+            conversion = " ".join([
+                FFMPEG,  "-i", f'"{m4a_file}"', attach_file, "-map 0:a", sample_convert, "-disposition:v:0 attached_pic",
+                "-map_metadata 0", '-metadata:s:v title="Album cover"',
+                '-metadata:s:v comment="Cover (front)"', resize_filter, f'"{temp_m4a}"', "-y",
+            ])
+            if DRY_RUN:
+                print(conversion)
+                print("\n")
+            else:
+                print(f"\nRunning operations on: {m4a_file}")
+                try:
+                    output = subprocess.run(conversion,
+                                stderr=subprocess.PIPE,
+                                encoding='utf-8'
+                                )
+                    
+                    if os.path.exists(temp_m4a):
+                        print(f"Succeeded, moving temp file to {m4a_file}")
+                        os.replace(temp_m4a, m4a_file)
+                except Exception as e:
+                    print(f"Error resizing file cover: {m4a_file}\n{e}")
+                    print(f"Command to convert was: {conversion}")
+
+                    
     
     music = walk_music_files(directory)
     print(f"FLACs: {music["flac"]}\nALACs: {music["m4a"]}\nMP3s: {music["mp3"]}")
