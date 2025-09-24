@@ -1,0 +1,25 @@
+$set(_feat_title,$rsearch(%artist%,\\s+\\\(?\([Ff]\(ea\)?t.[^\)]*\)))
+
+$noop(Match " & 2nd artist" and strip it)
+$set(artist,$rreplace(%artist%,\\s+\\&\\s+\(.[^\)]*\),))
+$noop(Match Featuring/feat)
+$set(artist,$rreplace(%artist%,\\s+\\\(?\([Ff]\(ea\)?t.[^\)]*\),))
+
+$noop(Same as above, but for artist sort order)
+$set(artistsort,$rreplace(%artist%,\\s+\\&\\s+\(.[^\)]*\),))
+$set(artistsort,$rreplace(%artist%,\\s+\\\(?\([Ff]\(ea\)?t.[^\)]*\),))
+
+$set(title,$if(%_feat_title%,%title% \(%_feat_title%\),%title%))
+
+
+$set(_feat_album,$rsearch(%albumartist%,\\s+\\\(?\([Ff]\(ea\)?t\\.[^\)]*\)))
+
+$noop(Move "With 2nd artist" to album title, rather than artist credit
+Needs 2.14 which isn't yet available)
+$noop($set(_with_title,$rsearch(%albumartist%,\\s+\\&\\s+\(.[^\)]*\)))
+$set(_feat_album,$join(With ,_with_title,\))))
+
+$noop(Same as above, but for album)
+$set(albumartist,$rreplace(%albumartist%,\\s+\\\(?\([Ff]\(ea\)?t.[^\)]*\),))
+$set(albumartistsort,$rreplace(%albumartist%,\\s+\\\(?\([Ff]\(ea\)?t.[^\)]*\),))
+$set(album,$if(%_feat_album%,%album% \(%_feat_album%\),%album%))
